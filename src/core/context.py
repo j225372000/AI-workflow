@@ -1,35 +1,40 @@
-from dataclasses import dataclass, field
-from typing import Any
+import json
+from pathlib import Path
 
 
-@dataclass
 class PlatformContext:
-    """
-    平台共用上下文。
-    所有 Workflow、Skill 都透過這個物件交換資料。
-    """
-
-    input: dict = field(default_factory=dict)
-    memory: dict = field(default_factory=dict)
-    output: dict = field(default_factory=dict)
-    metadata: dict = field(default_factory=dict)
-
-    def get(self, section: str, key: str, default: Any = None) -> Any:
-        if not hasattr(self, section):
-            raise ValueError(f"未知 context 區塊：{section}")
-
-        return getattr(self, section).get(key, default)
-
-    def set(self, section: str, key: str, value: Any) -> None:
-        if not hasattr(self, section):
-            raise ValueError(f"未知 context 區塊：{section}")
-
-        getattr(self, section)[key] = value
-
-    def to_dict(self) -> dict:
-        return {
-            "input": self.input,
-            "memory": self.memory,
-            "output": self.output,
-            "metadata": self.metadata,
+    def __init__(self):
+        self.data = {
+            "input": {},
+            "memory": {},
+            "output": {},
+            "metadata": {}
         }
+
+    def get(self, section: str, key: str, default=None):
+        return self.data.get(section, {}).get(key, default)
+
+    def set(self, section: str, key: str, value):
+        if section not in self.data:
+            self.data[section] = {}
+        self.data[section][key] = value
+
+    def to_dict(self):
+        return self.data
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        context = cls()
+        context.data = data
+        return context
+
+    def save_json(self, path: str):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self.data, f, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def load_json(cls, path: str):
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return cls.from_dict(data)

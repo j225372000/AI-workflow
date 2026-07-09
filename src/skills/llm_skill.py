@@ -21,10 +21,7 @@ class LLMSkill:
         model = step_config.get("model")
         retry = step_config.get("retry", 3)
 
-        prompt = self._build_prompt(
-            prompt_path=prompt_path,
-            inputs=inputs
-        )
+        prompt = self._build_prompt(prompt_path, inputs)
 
         provider = get_provider(provider_name)
 

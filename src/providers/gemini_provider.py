@@ -3,10 +3,9 @@ import time
 
 import google.generativeai as genai
 
-from src.providers.base_provider import BaseProvider
 
 
-class GeminiProvider(BaseProvider):
+class GeminiProvider:
     name = "gemini"
 
     def __init__(

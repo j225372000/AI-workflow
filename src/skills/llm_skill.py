@@ -1,10 +1,9 @@
 from pathlib import Path
 
-from src.skills.base_skill import BaseSkill
 from src.providers.provider_registry import get_provider
 
 
-class LLMSkill(BaseSkill):
+class LLMSkill:
     name = "llm"
 
     def _build_prompt(self, prompt_path: str, inputs: dict) -> str:

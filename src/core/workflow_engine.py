@@ -42,8 +42,32 @@ class WorkflowEngine:
                 outputs.get(output_name)
             )
 
-    def run(self, context=None):
-        if context is None:
+    def _outputs_exist(self, context: PlatformContext, step: dict) -> bool:
+        output_mapping = step.get("output", {})
+
+        if not output_mapping:
+            return False
+
+        for _, context_path in output_mapping.items():
+            section, key = context_path.split(".", 1)
+            value = context.get(section, key)
+
+            if value is None or value == "":
+                return False
+
+        return True
+
+    def run(
+        self,
+        context=None,
+        checkpoint_path=None,
+        resume=True
+    ):
+        if checkpoint_path and resume and Path(checkpoint_path).exists():
+            print(f"讀取 checkpoint：{checkpoint_path}")
+            context = PlatformContext.load_json(checkpoint_path)
+
+        elif context is None:
             context = PlatformContext()
 
         print(f"\nWorkflow：{self.workflow['name']}")
@@ -55,6 +79,10 @@ class WorkflowEngine:
             print(f"Step：{step['id']}")
             print(f"Skill：{skill_name}")
 
+            if resume and self._outputs_exist(context, step):
+                print("已存在輸出，跳過此步驟")
+                continue
+
             skill = get_skill(skill_name)
 
             inputs = self._build_inputs(context, step)
@@ -65,5 +93,9 @@ class WorkflowEngine:
             )
 
             self._write_outputs(context, step, outputs)
+
+            if checkpoint_path:
+                context.save_json(checkpoint_path)
+                print(f"已儲存 checkpoint：{checkpoint_path}")
 
         return context

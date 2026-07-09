@@ -1,0 +1,59 @@
+name: meeting
+description: 金融機構簡報會議簽文 Workflow
+
+steps:
+
+  - id: signoff_structure
+    skill: llm
+    input:
+      slide_text: input.slide_text
+    output:
+      result: memory.signoff_structure
+    prompt: templates/meeting/signoff_structure.txt
+    provider: gemini
+    model: models/gemini-2.5-flash-lite
+    retry: 1
+
+  - id: slide_summary
+    skill: llm
+    input:
+      slide_text: input.slide_text
+    output:
+      result: memory.slide_summary
+    prompt: templates/meeting/slide_summary.txt
+    provider: gemini
+    model: models/gemini-2.5-flash-lite
+    retry: 1
+
+  - id: meeting_record
+    skill: llm
+    input:
+      transcript_text: input.transcript_text
+    output:
+      result: memory.meeting_record
+    prompt: templates/meeting/meeting_record.txt
+    provider: gemini
+    model: models/gemini-2.5-flash-lite
+    retry: 1
+
+  - id: signoff_writer
+    skill: llm
+    input:
+      signoff_structure: memory.signoff_structure
+      slide_summary: memory.slide_summary
+      meeting_record: memory.meeting_record
+    output:
+      result: output.final_text
+    prompt: templates/meeting/signoff_writer.txt
+    provider: gemini
+    model: models/gemini-2.5-flash-lite
+    retry: 1
+
+  - id: export_docx
+    skill: docx
+    input:
+      text: output.final_text
+      output_path: output.docx_path
+    output:
+      path: output.docx_path
+    mode: signoff

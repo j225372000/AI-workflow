@@ -1,0 +1,59 @@
+name: morning
+description: 每日金融晨報 Workflow
+
+steps:
+  - id: classify_news
+    skill: llm
+    input:
+      text: input.news_text
+    output:
+      result: memory.classify_result
+    prompt: templates/morning/classifier.txt
+    provider: gemini
+    model: models/gemini-2.5-flash-lite
+    retry: 1
+
+  - id: extract_news
+    skill: llm
+    input:
+      text: input.news_text
+    output:
+      result: memory.extract_result
+    prompt: templates/morning/extractor.txt
+    provider: gemini
+    model: models/gemini-2.5-flash-lite
+    retry: 1
+
+  - id: write_draft
+    skill: llm
+    input:
+      classify_result: memory.classify_result
+      extract_result: memory.extract_result
+    output:
+      result: memory.draft_text
+    prompt: templates/morning/writer.txt
+    provider: gemini
+    model: models/gemini-2.5-flash-lite
+    retry: 1
+
+  - id: format_report
+    skill: llm
+    input:
+      classify_result: memory.classify_result
+      extract_result: memory.extract_result
+      draft_text: memory.draft_text
+    output:
+      result: output.final_text
+    prompt: templates/morning/formatter.txt
+    provider: gemini
+    model: models/gemini-2.5-flash-lite
+    retry: 1
+
+  - id: export_docx
+    skill: docx
+    input:
+      text: output.final_text
+      output_path: output.docx_path
+    output:
+      path: output.docx_path
+    mode: morning

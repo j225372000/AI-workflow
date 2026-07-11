@@ -1,13 +1,19 @@
 name: morning
-description: 每日金融晨報 Workflow
+description: 多篇新聞金融晨報 Workflow
 
 steps:
+
   - id: classify_news
     skill: llm
+    for_each: input.news_list
     input:
-      text: input.news_text
+      text: item.content
+      filename: item.filename
+    collect:
+      include_item: true
+      result_key: classification
     output:
-      result: memory.classify_result
+      result: memory.classified_news
     prompt: templates/morning/classifier.txt
     provider: gemini
     model: models/gemini-2.5-flash-lite
@@ -15,22 +21,33 @@ steps:
 
   - id: extract_news
     skill: llm
+    for_each: memory.classified_news
     input:
-      text: input.news_text
+      text: item.content
+      filename: item.filename
+      classification: item.classification
+    collect:
+      include_item: true
+      result_key: extraction
     output:
-      result: memory.extract_result
+      result: memory.extracted_news
     prompt: templates/morning/extractor.txt
     provider: gemini
     model: models/gemini-2.5-flash-lite
     retry: 1
 
-  - id: write_draft
+  - id: write_drafts
     skill: llm
+    for_each: memory.extracted_news
     input:
-      classify_result: memory.classify_result
-      extract_result: memory.extract_result
+      filename: item.filename
+      classification: item.classification
+      extract_result: item.extraction
+    collect:
+      include_item: true
+      result_key: draft
     output:
-      result: memory.draft_text
+      result: memory.draft_items
     prompt: templates/morning/writer.txt
     provider: gemini
     model: models/gemini-2.5-flash-lite
@@ -39,9 +56,7 @@ steps:
   - id: format_report
     skill: llm
     input:
-      classify_result: memory.classify_result
-      extract_result: memory.extract_result
-      draft_text: memory.draft_text
+      draft_items: memory.draft_items
     output:
       result: output.final_text
     prompt: templates/morning/formatter.txt

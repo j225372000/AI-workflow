@@ -1,4 +1,6 @@
+from copy import deepcopy
 from pathlib import Path
+import json
 
 import yaml
 
@@ -45,7 +47,72 @@ class WorkflowEngine:
             )
 
         section, key = path.split(".", 1)
-        return context.get(section, key)
+
+        return context.get(
+            section,
+            key
+        )
+
+    def _resolve_item_path(
+        self,
+        item,
+        path: str
+    ):
+        """
+        解析 for_each 單筆資料。
+
+        例如：
+        item.content
+        item.filename
+        item.classification
+        """
+        if path == "item":
+            return item
+
+        if not path.startswith("item."):
+            raise ValueError(
+                f"無效的 item 路徑：{path}"
+            )
+
+        keys = path.split(".")[1:]
+        value = item
+
+        for key in keys:
+            if not isinstance(value, dict):
+                raise ValueError(
+                    f"無法從非 dict 資料解析：{path}"
+                )
+
+            if key not in value:
+                raise KeyError(
+                    f"item 缺少欄位「{key}」：{path}"
+                )
+
+            value = value[key]
+
+        return value
+
+    def _resolve_reference(
+        self,
+        context: PlatformContext,
+        reference: str,
+        item=None
+    ):
+        if reference == "item" or reference.startswith("item."):
+            if item is None:
+                raise ValueError(
+                    f"非 for_each Step 不可使用 item 路徑：{reference}"
+                )
+
+            return self._resolve_item_path(
+                item,
+                reference
+            )
+
+        return self._resolve_path(
+            context,
+            reference
+        )
 
     def _write_path(
         self,
@@ -59,25 +126,32 @@ class WorkflowEngine:
             )
 
         section, key = path.split(".", 1)
-        context.set(section, key, value)
+
+        context.set(
+            section,
+            key,
+            value
+        )
 
     def _build_inputs(
         self,
         context: PlatformContext,
-        step: dict
+        step: dict,
+        item=None
     ) -> dict:
         inputs = {}
 
-        for input_name, context_path in step.get("input", {}).items():
-            value = self._resolve_path(
-                context,
-                context_path
+        for input_name, reference in step.get("input", {}).items():
+            value = self._resolve_reference(
+                context=context,
+                reference=reference,
+                item=item
             )
 
             if value is None:
                 raise ValueError(
                     f"Step「{step.get('id')}」缺少輸入資料："
-                    f"{context_path}"
+                    f"{reference}"
                 )
 
             inputs[input_name] = value
@@ -92,8 +166,8 @@ class WorkflowEngine:
     ):
         if not isinstance(outputs, dict):
             raise TypeError(
-                f"Step「{step.get('id')}」的輸出必須是 dict，"
-                f"目前型態為：{type(outputs).__name__}"
+                f"Step「{step.get('id')}」輸出必須是 dict，"
+                f"目前為：{type(outputs).__name__}"
             )
 
         for output_name, context_path in step.get("output", {}).items():
@@ -142,6 +216,9 @@ class WorkflowEngine:
             if value is None or value == "":
                 return False
 
+            if isinstance(value, list) and not value:
+                return False
+
             if self._is_file_output(
                 step,
                 output_name,
@@ -163,10 +240,6 @@ class WorkflowEngine:
         step: dict,
         artifact_dir
     ):
-        """
-        根據 YAML 的 artifact 欄位，
-        取得該 Step 中間成果的實際儲存位置。
-        """
         artifact_name = step.get("artifact")
 
         if not artifact_name or not artifact_dir:
@@ -180,26 +253,28 @@ class WorkflowEngine:
         step: dict,
         artifact_path: Path
     ):
-        """
-        將既有 Step 成果讀回 Context。
-
-        目前 artifact 適用於只有一個文字輸出的 Step。
-        """
         output_mapping = step.get("output", {})
 
         if len(output_mapping) != 1:
             raise ValueError(
                 f"Step「{step.get('id')}」使用 artifact 時，"
-                "目前僅支援單一輸出欄位。"
+                "目前只支援單一輸出。"
             )
 
         output_name, context_path = next(
             iter(output_mapping.items())
         )
 
-        value = artifact_path.read_text(
-            encoding="utf-8"
-        )
+        if artifact_path.suffix.lower() == ".json":
+            with artifact_path.open(
+                "r",
+                encoding="utf-8"
+            ) as file:
+                value = json.load(file)
+        else:
+            value = artifact_path.read_text(
+                encoding="utf-8"
+            )
 
         self._write_path(
             context,
@@ -217,15 +292,12 @@ class WorkflowEngine:
         outputs: dict,
         artifact_path: Path
     ):
-        """
-        將 Step 的文字輸出另存為獨立檔案。
-        """
         output_mapping = step.get("output", {})
 
         if len(output_mapping) != 1:
             raise ValueError(
                 f"Step「{step.get('id')}」使用 artifact 時，"
-                "目前僅支援單一輸出欄位。"
+                "目前只支援單一輸出。"
             )
 
         output_name = next(
@@ -234,26 +306,187 @@ class WorkflowEngine:
 
         if output_name not in outputs:
             raise KeyError(
-                f"Step「{step.get('id')}」缺少可儲存的輸出："
-                f"{output_name}"
+                f"Step「{step.get('id')}」缺少輸出：{output_name}"
             )
 
         value = outputs[output_name]
-
-        if value is None:
-            raise ValueError(
-                f"Step「{step.get('id')}」輸出為空，無法儲存 artifact。"
-            )
 
         artifact_path.parent.mkdir(
             parents=True,
             exist_ok=True
         )
 
-        artifact_path.write_text(
-            str(value),
-            encoding="utf-8"
+        if artifact_path.suffix.lower() == ".json":
+            with artifact_path.open(
+                "w",
+                encoding="utf-8"
+            ) as file:
+                json.dump(
+                    value,
+                    file,
+                    ensure_ascii=False,
+                    indent=2
+                )
+        else:
+            artifact_path.write_text(
+                str(value),
+                encoding="utf-8"
+            )
+
+    def _run_single_step(
+        self,
+        context: PlatformContext,
+        step: dict,
+        skill
+    ) -> dict:
+        inputs = self._build_inputs(
+            context=context,
+            step=step
         )
+
+        return skill.run(
+            inputs=inputs,
+            step_config=step
+        )
+
+    def _run_foreach_step(
+        self,
+        context: PlatformContext,
+        step: dict,
+        skill
+    ) -> dict:
+        """
+        逐筆執行同一個 Skill。
+
+        YAML 範例：
+
+        for_each: input.news_list
+        input:
+          text: item.content
+        collect:
+          include_item: true
+          result_key: classification
+        output:
+          result: memory.classified_news
+        """
+        collection_path = step["for_each"]
+
+        collection = self._resolve_path(
+            context,
+            collection_path
+        )
+
+        if not isinstance(collection, list):
+            raise TypeError(
+                f"Step「{step.get('id')}」的 for_each 資料必須是 list，"
+                f"目前為：{type(collection).__name__}"
+            )
+
+        collect_config = step.get(
+            "collect",
+            {}
+        )
+
+        include_item = collect_config.get(
+            "include_item",
+            False
+        )
+
+        result_key = collect_config.get(
+            "result_key",
+            "result"
+        )
+
+        collected_results = []
+        total = len(collection)
+
+        for index, item in enumerate(
+            collection,
+            start=1
+        ):
+            print(
+                f"處理第 {index}/{total} 筆"
+            )
+
+            inputs = self._build_inputs(
+                context=context,
+                step=step,
+                item=item
+            )
+
+            item_outputs = skill.run(
+                inputs=inputs,
+                step_config=step
+            )
+
+            if not isinstance(item_outputs, dict):
+                raise TypeError(
+                    f"Step「{step.get('id')}」第 {index} 筆輸出"
+                    "必須是 dict。"
+                )
+
+            if include_item:
+                if isinstance(item, dict):
+                    collected_item = deepcopy(item)
+                else:
+                    collected_item = {
+                        "item": item
+                    }
+
+                if len(item_outputs) == 1:
+                    only_value = next(
+                        iter(item_outputs.values())
+                    )
+
+                    collected_item[result_key] = only_value
+                else:
+                    collected_item.update(
+                        item_outputs
+                    )
+
+                collected_results.append(
+                    collected_item
+                )
+
+            else:
+                if len(item_outputs) == 1:
+                    collected_results.append(
+                        next(iter(item_outputs.values()))
+                    )
+                else:
+                    collected_results.append(
+                        item_outputs
+                    )
+
+        # LLMSkill 的標準輸出名稱為 result。
+        return {
+            "result": collected_results
+        }
+
+    def _merge_current_runtime_context(
+        self,
+        saved_context: PlatformContext,
+        current_context: PlatformContext
+    ):
+        """
+        使用本次 Launcher 提供的 input、output 路徑與 metadata，
+        覆蓋 checkpoint 中可能過時的執行環境資料。
+        """
+        current_data = current_context.to_dict()
+
+        for section in [
+            "input",
+            "output",
+            "metadata"
+        ]:
+            for key, value in current_data.get(section, {}).items():
+                saved_context.set(
+                    section,
+                    key,
+                    value
+                )
+
+        return saved_context
 
     def run(
         self,
@@ -262,35 +495,47 @@ class WorkflowEngine:
         artifact_dir=None,
         resume=True
     ):
-        """
-        執行 Workflow。
-
-        checkpoint_path：
-            儲存整體 Context 的 JSON。
-
-        artifact_dir：
-            儲存每一個 Step 的獨立文字成果。
-
-        resume：
-            True 時，優先讀取已存在的 Step artifact，
-            並跳過不需要重新執行的步驟。
-        """
+        if context is None:
+            context = PlatformContext()
 
         if (
             checkpoint_path
             and resume
             and Path(checkpoint_path).exists()
         ):
-            print(
-                f"讀取 checkpoint：{checkpoint_path}"
-            )
-
-            context = PlatformContext.load_json(
+            saved_context = PlatformContext.load_json(
                 checkpoint_path
             )
 
-        elif context is None:
-            context = PlatformContext()
+            saved_signature = saved_context.get(
+                "metadata",
+                "source_signature"
+            )
+
+            current_signature = context.get(
+                "metadata",
+                "source_signature"
+            )
+
+            if (
+                saved_signature
+                and current_signature
+                and saved_signature != current_signature
+            ):
+                print(
+                    "輸入資料已變更，忽略舊 checkpoint，"
+                    "本次將重新執行 Workflow。"
+                )
+
+            else:
+                print(
+                    f"讀取 checkpoint：{checkpoint_path}"
+                )
+
+                context = self._merge_current_runtime_context(
+                    saved_context=saved_context,
+                    current_context=context
+                )
 
         if artifact_dir:
             Path(artifact_dir).mkdir(
@@ -308,7 +553,7 @@ class WorkflowEngine:
 
             if not step_id:
                 raise ValueError(
-                    "Workflow step 缺少 id"
+                    "Workflow Step 缺少 id"
                 )
 
             if not skill_name:
@@ -325,7 +570,6 @@ class WorkflowEngine:
                 artifact_dir
             )
 
-            # 有獨立 Step 成果時，直接讀回 Context。
             if (
                 resume
                 and artifact_path
@@ -342,8 +586,6 @@ class WorkflowEngine:
                 )
                 continue
 
-            # 沒有設定 artifact 的 Step，
-            # 才使用原本的 Context／實體檔案判斷。
             if (
                 resume
                 and artifact_path is None
@@ -361,15 +603,18 @@ class WorkflowEngine:
                 skill_name
             )
 
-            inputs = self._build_inputs(
-                context,
-                step
-            )
-
-            outputs = skill.run(
-                inputs=inputs,
-                step_config=step
-            )
+            if step.get("for_each"):
+                outputs = self._run_foreach_step(
+                    context=context,
+                    step=step,
+                    skill=skill
+                )
+            else:
+                outputs = self._run_single_step(
+                    context=context,
+                    step=step,
+                    skill=skill
+                )
 
             self._write_outputs(
                 context,

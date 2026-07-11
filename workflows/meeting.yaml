@@ -51,7 +51,7 @@ steps:
     artifact: 04_signoff_writer.txt
     prompt: templates/meeting/04_signoff_writer.txt
     provider: gemini
-    model: models/gemini-2.5-flash-lite
+    model: models/gemini-3.5-flash-lite
     retry: 1
 
   - id: export_docx
